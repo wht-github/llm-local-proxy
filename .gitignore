@@ -1,1 +1,24 @@
+# 二进制文件
+bin/
+dist/
+*.exe
+proxy
+ds-proxy
 
+# 配置文件
+config.json
+.env
+
+# 日志文件
+*.log
+
+# IDE 文件
+.vscode/
+.idea/
+
+# Go 模块
+go.sum
+
+# 临时文件
+tmp/
+*.tmp

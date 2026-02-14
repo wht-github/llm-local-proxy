@@ -13,31 +13,64 @@ import (
 	"time"
 )
 
-// 配置常量
-const (
-	TargetURL = "https://api.deepseek.com/v1/chat/completions"
-	ProxyPort = "12000"
-)
+// 配置结构
+type Config struct {
+	APIKey        string `json:"api_key"`
+	ProxyPort     string `json:"proxy_port"`
+	TargetBaseURL string `json:"target_base_url"`
+}
+
+// 全局配置变量
+var config Config
+var debugMode bool
 
 // 复用连接池
 var httpClient = &http.Client{
 	Timeout: 5 * time.Minute,
 }
 
-// 全局调试标志
-var debugMode bool
+// loadConfig 从 JSON 文件加载配置
+func loadConfig(configFile string) error {
+	file, err := os.Open(configFile)
+	if err != nil {
+		return fmt.Errorf("无法打开配置文件 %s: %v", configFile, err)
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&config); err != nil {
+		return fmt.Errorf("解析配置文件失败: %v", err)
+	}
+
+	// 验证必要字段
+	if config.APIKey == "" {
+		return fmt.Errorf("配置文件中缺少 api_key")
+	}
+	if config.ProxyPort == "" {
+		config.ProxyPort = "12000" // 默认端口
+	}
+	if config.TargetBaseURL == "" {
+		config.TargetBaseURL = "https://api.deepseek.com" // 默认地址
+	}
+
+	return nil
+}
 
 func main() {
-	// 解析命令行参数
+	var configFile string
+	flag.StringVar(&configFile, "config", "config.json", "配置文件路径")
 	flag.BoolVar(&debugMode, "debug", false, "启用调试模式，打印非流式请求和响应详情")
 	flag.Parse()
 
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		fmt.Println("❌ 错误: 未检测到环境变量 DEEPSEEK_API_KEY")
-		fmt.Println("请设置后再运行:")
-		fmt.Println("  PowerShell: $env:DEEPSEEK_API_KEY=\"你的密钥\"")
-		fmt.Println("  CMD:        set DEEPSEEK_API_KEY=你的密钥")
+	// 加载配置文件
+	if err := loadConfig(configFile); err != nil {
+		fmt.Printf("❌ 加载配置失败: %v\n", err)
+		fmt.Println("请创建 config.json 文件，格式如下:")
+		fmt.Println(`{
+  "api_key": "your-deepseek-api-key-here",
+  "proxy_port": "12000",
+  "target_base_url": "https://api.deepseek.com"
+}`)
 		os.Exit(1)
 	}
 
@@ -45,11 +78,12 @@ func main() {
 		fmt.Println("🔧 调试模式已启用 - 将打印非流式请求和响应详情")
 	}
 
-	// 注册路由
-	http.HandleFunc("/v1/chat/completions", handleProxy)
+	// 注册路由 - 保留所有原始路由，转发到对应路径
+	http.HandleFunc("/", handleProxy)
 
-	fmt.Printf("🚀 LLM Proxy 已就绪: http://127.0.0.1:%s\n", ProxyPort)
-	if err := http.ListenAndServe(":"+ProxyPort, nil); err != nil {
+	fmt.Printf("🚀 LLM Proxy 已就绪: http://127.0.0.1:%s\n", config.ProxyPort)
+	fmt.Printf("📡 目标服务器: %s\n", config.TargetBaseURL)
+	if err := http.ListenAndServe(":"+config.ProxyPort, nil); err != nil {
 		fmt.Printf("服务器启动失败: %v\n", err)
 	}
 }
@@ -72,8 +106,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	body = ensureReasoningField(body)
 
-	// 2. 构造转发请求
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, TargetURL, bytes.NewBuffer(body))
+	// 2. 构造转发请求 - 保留原始路由路径
+	targetURL := config.TargetBaseURL + r.URL.Path
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewBuffer(body))
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)
 		return
@@ -81,7 +116,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// 3. 设置 Headers
 	copyHeader(proxyReq.Header, r.Header)
-	proxyReq.Header.Set("Authorization", "Bearer "+os.Getenv("DEEPSEEK_API_KEY"))
+	proxyReq.Header.Set("Authorization", "Bearer "+config.APIKey)
 
 	// 修正转发必要的 Header
 	proxyReq.Header.Del("Accept-Encoding") // 禁用压缩以便进行实时修改内容

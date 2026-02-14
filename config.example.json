@@ -1,0 +1,5 @@
+{
+  "api_key": "your-deepseek-api-key-here",
+  "proxy_port": "12000",
+  "target_base_url": "https://api.deepseek.com"
+}
