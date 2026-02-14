@@ -170,7 +170,7 @@ func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 			dataBytes = bytes.TrimSpace(dataBytes)
 
 			if string(dataBytes) != "[DONE]" {
-				var data map[string]interface{}
+				var data map[string]any
 				if err := json.Unmarshal(dataBytes, &data); err == nil {
 					clearReasoning(data)
 					if newData, err := json.Marshal(data); err == nil {
