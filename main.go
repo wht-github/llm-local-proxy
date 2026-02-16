@@ -145,7 +145,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	// 6. 处理响应内容
-	isSSE := resp.Header.Get("Content-Type") == "text/event-stream"
+	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if resp.StatusCode != http.StatusOK || !isSSE {
 		// 非流式响应 - 记录完整请求和响应（如果启用了调试模式）
 		if debugMode {
@@ -156,10 +156,27 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if debugMode {
+		fmt.Println("\n" + strings.Repeat("=", 80))
+		fmt.Println("📤 流式请求详情")
+		fmt.Println(strings.Repeat("-", 40))
+		fmt.Println("请求体 (简化):")
+		fmt.Println(getDebugRequestBody(originalBody))
+		fmt.Println("\n📥 流式响应内容:")
+		fmt.Println(strings.Repeat("-", 40))
+	}
+
 	processSSEResponse(w, resp.Body)
+
+	if debugMode {
+		fmt.Println("\n" + strings.Repeat("=", 80) + "\n")
+	}
 }
 
-// ensureReasoningField 确保 assistant 消息中包含 reasoning_content 字段，避免 400 错误
+// ensureReasoningField 确保 assistant 消息中包含 reasoning_content 字段。
+// 遵循 DeepSeek 最佳实践：
+// 1. 在当前轮对话（如工具调用过程中）还原 <thought> 为 reasoning_content，防止 400 错误。
+// 2. 在开启新一轮对话时，丢弃之前轮次的 reasoning_content 以节省带宽。
 func ensureReasoningField(body []byte) []byte {
 	var data map[string]interface{}
 	if err := json.Unmarshal(body, &data); err != nil {
@@ -171,9 +188,52 @@ func ensureReasoningField(body []byte) []byte {
 		return body
 	}
 
+	// 找到最后一个用户消息的索引，作为“当前轮次”的界限
+	lastUserIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if msg, ok := messages[i].(map[string]any); ok && msg["role"] == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+
 	changed := false
-	for _, m := range messages {
-		if msg, ok := m.(map[string]any); ok && msg["role"] == "assistant" {
+	for i, m := range messages {
+		msg, ok := m.(map[string]any)
+		if !ok || msg["role"] != "assistant" {
+			continue
+		}
+
+		content, _ := msg["content"].(string)
+		hasThought := strings.Contains(content, "<thought>") && strings.Contains(content, "</thought>")
+
+		if i < lastUserIdx {
+			// 情况 A: 历史轮次的思考内容，根据文档建议予以丢弃
+			if hasThought {
+				startIdx := strings.Index(content, "<thought>")
+				endIdx := strings.Index(content, "</thought>")
+				newContent := content[:startIdx] + content[endIdx+len("</thought>"):]
+				msg["content"] = strings.TrimSpace(newContent)
+				changed = true
+			}
+			if _, exists := msg["reasoning_content"]; exists {
+				delete(msg, "reasoning_content")
+				changed = true
+			}
+		} else {
+			// 情况 B: 当前轮次（可能是工具调用），必须还原/保留 reasoning_content
+			if hasThought {
+				startIdx := strings.Index(content, "<thought>")
+				endIdx := strings.Index(content, "</thought>")
+				thought := content[startIdx+len("<thought>") : endIdx]
+				msg["reasoning_content"] = strings.TrimSpace(thought)
+
+				newContent := content[:startIdx] + content[endIdx+len("</thought>"):]
+				msg["content"] = strings.TrimSpace(newContent)
+				changed = true
+			}
+
+			// API 要求 assistant 角色的 reasoning_content 字段必须存在（即使为空）
 			if _, exists := msg["reasoning_content"]; !exists {
 				msg["reasoning_content"] = ""
 				changed = true
@@ -189,10 +249,14 @@ func ensureReasoningField(body []byte) []byte {
 	return body
 }
 
-// processSSEResponse 处理 SSE 流式响应，清空 reasoning 内容
+// processSSEResponse 处理 SSE 流式响应。
+// 按照 DeepSeek 文档，正确处理 reasoning_content，并将其合并到 content 中显示以保证兼容性。
 func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 	flusher, _ := w.(http.Flusher)
 	reader := bufio.NewReader(body)
+
+	isReasoning := false
+	hasReasoningStarted := false
 
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -204,10 +268,62 @@ func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 			dataBytes := bytes.TrimPrefix(line, []byte("data: "))
 			dataBytes = bytes.TrimSpace(dataBytes)
 
-			if string(dataBytes) != "[DONE]" {
+			if string(dataBytes) == "[DONE]" {
+				// 如果流结束时还在推理状态（如 max_tokens 耗尽），强行闭合标签
+				if isReasoning {
+					injectClosingTag(w, flusher)
+				}
+				if debugMode {
+					fmt.Println("\n[DONE]")
+				}
+			} else {
 				var data map[string]any
 				if err := json.Unmarshal(dataBytes, &data); err == nil {
-					clearReasoning(data)
+					if choices, ok := data["choices"].([]any); ok && len(choices) > 0 {
+						if choice, ok := choices[0].(map[string]any); ok {
+							delta, ok := choice["delta"].(map[string]any)
+							if ok {
+								rc, hasRC := delta["reasoning_content"].(string)
+								content, hasContent := delta["content"].(string)
+
+								// 注入逻辑
+								if hasRC && rc != "" {
+									if !hasReasoningStarted {
+										if debugMode {
+											fmt.Print("\n--- 推理开始 ---\n")
+										}
+										delta["content"] = "<thought>\n" + rc
+										hasReasoningStarted = true
+										isReasoning = true
+									} else {
+										delta["content"] = rc
+									}
+									if debugMode {
+										fmt.Print(rc)
+									}
+								} else if isReasoning && (hasContent || choice["finish_reason"] != nil) {
+									// 推理结束切换到正文，或者直接结束
+									if debugMode {
+										fmt.Print("\n--- 正文开始 ---\n")
+									}
+									delta["content"] = "\n</thought>\n\n" + content
+									isReasoning = false
+									if debugMode && hasContent {
+										fmt.Print(content)
+									}
+								} else if debugMode && hasContent && content != "" {
+									fmt.Print(content)
+								}
+
+								// 清理原始字段并修复 content: null
+								delete(delta, "reasoning_content")
+								if v, exists := delta["content"]; exists && v == nil {
+									delta["content"] = ""
+								}
+							}
+						}
+					}
+
 					if newData, err := json.Marshal(data); err == nil {
 						line = append([]byte("data: "), newData...)
 						line = append(line, '\n')
@@ -223,26 +339,61 @@ func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 	}
 }
 
-// clearReasoning 清空响应中的推理内容，使 UI 渲染更简洁
-func clearReasoning(data map[string]interface{}) {
-	choices, ok := data["choices"].([]interface{})
-	if !ok {
-		return
+// injectClosingTag 在流意外结束时注入闭合标签
+func injectClosingTag(w http.ResponseWriter, flusher http.Flusher) {
+	msg := map[string]any{
+		"choices": []any{
+			map[string]any{
+				"delta": map[string]any{
+					"content": "\n</thought>\n\n",
+				},
+			},
+		},
 	}
-	for _, c := range choices {
-		choice, ok := c.(map[string]interface{})
-		if !ok {
-			continue
+	if b, err := json.Marshal(msg); err == nil {
+		w.Write([]byte("data: "))
+		w.Write(b)
+		w.Write([]byte("\n\n"))
+		if flusher != nil {
+			flusher.Flush()
 		}
-		// 同时检查 delta (流式) 和 message (非流式)
-		for _, key := range []string{"delta", "message"} {
-			if m, ok := choice[key].(map[string]interface{}); ok {
-				if _, exists := m["reasoning_content"]; exists {
-					m["reasoning_content"] = ""
+	}
+}
+
+// getDebugRequestBody 简化并转义请求体用于调试打印
+func getDebugRequestBody(body []byte) string {
+	var data map[string]any
+	if err := json.Unmarshal(body, &data); err != nil {
+		return string(body)
+	}
+
+	if messages, ok := data["messages"].([]any); ok {
+		simplified := make([]map[string]any, 0, len(messages))
+		for _, m := range messages {
+			if msg, ok := m.(map[string]any); ok {
+				newMsg := make(map[string]any)
+				for _, field := range []string{"role", "content", "reasoning_content"} {
+					if val, ok := msg[field]; ok {
+						newMsg[field] = val
+					}
 				}
+				simplified = append(simplified, newMsg)
 			}
 		}
+		data["messages"] = simplified
 	}
+
+	// 仅保留 messages 和 model 字段以便调试，其余字段（如 tools, max_tokens 等）忽略
+	cleanData := map[string]any{
+		"messages": data["messages"],
+	}
+	if model, ok := data["model"]; ok {
+		cleanData["model"] = model
+	}
+
+	// 使用 Marshal 而不使用 MarshalIndent，实现“转义”效果（所有内容在一行，字符串中的特殊字符会被转义）
+	b, _ := json.Marshal(cleanData)
+	return string(b)
 }
 
 // copyHeader 复制完整的 Header
@@ -259,18 +410,8 @@ func debugNonStreaming(r *http.Request, requestBody []byte, resp *http.Response,
 	fmt.Println("\n" + strings.Repeat("=", 80))
 	fmt.Println("📤 请求详情")
 	fmt.Println(strings.Repeat("-", 40))
-
-	// 解析并美化打印请求体
-	var reqData map[string]interface{}
-	if err := json.Unmarshal(requestBody, &reqData); err == nil {
-		if pretty, err := json.MarshalIndent(reqData, "", "  "); err == nil {
-			fmt.Println("请求体:")
-			fmt.Println(string(pretty))
-		}
-	} else {
-		fmt.Printf("请求体解析失败: %v\n", err)
-		fmt.Printf("原始请求体: %s\n", string(requestBody))
-	}
+	fmt.Println("请求体 (简化):")
+	fmt.Println(getDebugRequestBody(requestBody))
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
