@@ -177,6 +177,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 // 遵循 DeepSeek 最佳实践：
 // 1. 在当前轮对话（如工具调用过程中）还原 <thought> 为 reasoning_content，防止 400 错误。
 // 2. 在开启新一轮对话时，丢弃之前轮次的 reasoning_content 以节省带宽。
+//
+// 多步工具调用场景：
+// - 在工具调用过程中，每个 assistant 响应都可能包含独立的推理过程
+// - 必须保留当前轮次的所有 reasoning_content，否则 API 会返回 400 错误
+// - 只有在开启新一轮对话（新的 user 消息）后，才丢弃历史 reasoning_content
 func ensureReasoningField(body []byte) []byte {
 	var data map[string]interface{}
 	if err := json.Unmarshal(body, &data); err != nil {
@@ -251,16 +256,29 @@ func ensureReasoningField(body []byte) []byte {
 
 // processSSEResponse 处理 SSE 流式响应。
 // 按照 DeepSeek 文档，正确处理 reasoning_content，并将其合并到 content 中显示以保证兼容性。
+//
+// 关键要点：
+// 1. reasoning_content 一定先于 content 出现（流式输出特性）
+// 2. 当 content 字段首次出现时，标志着推理阶段结束
+// 3. reasoning_content 和 content 的 tokens 总数受 max_tokens 限制
+// 4. 支持多步工具调用场景，每次工具调用可能都有独立的推理过程
 func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 	flusher, _ := w.(http.Flusher)
 	reader := bufio.NewReader(body)
 
+	// 状态追踪（按流顺序处理，确保每段推理都成对闭合）
 	isReasoning := false
-	hasReasoningStarted := false
 
 	for {
 		line, err := reader.ReadBytes('\n')
-		if err != nil {
+		if len(line) == 0 && err != nil {
+			if isReasoning {
+				injectClosingTag(w, flusher)
+				isReasoning = false
+				if debugMode {
+					fmt.Print("\n--- 推理意外结束（流提前关闭）---\n")
+				}
+			}
 			break
 		}
 
@@ -272,6 +290,10 @@ func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 				// 如果流结束时还在推理状态（如 max_tokens 耗尽），强行闭合标签
 				if isReasoning {
 					injectClosingTag(w, flusher)
+					isReasoning = false
+					if debugMode {
+						fmt.Print("\n--- 推理意外结束（tokens 耗尽）---\n")
+					}
 				}
 				if debugMode {
 					fmt.Println("\n[DONE]")
@@ -281,46 +303,88 @@ func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 				if err := json.Unmarshal(dataBytes, &data); err == nil {
 					if choices, ok := data["choices"].([]any); ok && len(choices) > 0 {
 						if choice, ok := choices[0].(map[string]any); ok {
-							delta, ok := choice["delta"].(map[string]any)
-							if ok {
-								rc, hasRC := delta["reasoning_content"].(string)
-								content, hasContent := delta["content"].(string)
+							delta, hasDelta := choice["delta"].(map[string]any)
+							if !hasDelta {
+								delta = map[string]any{}
+								choice["delta"] = delta
+							}
 
-								// 注入逻辑
-								if hasRC && rc != "" {
-									if !hasReasoningStarted {
+							if hasDelta || choice["finish_reason"] != nil || isReasoning {
+								// 检查是否存在 reasoning_content 和 content 字段
+								// 注意：某些情况下字段可能为 nil，需要区分"不存在"和"存在但为空/null"
+								rc, hasRC := delta["reasoning_content"]
+								content, hasContent := delta["content"]
+								hasNonNilContent := hasContent && content != nil
+
+								// 提取字符串值（如果不是字符串类型则视为空）
+								rcStr := ""
+								if rcVal, ok := rc.(string); ok {
+									rcStr = rcVal
+								}
+								contentStr := ""
+								if contentVal, ok := content.(string); ok {
+									contentStr = contentVal
+								}
+
+								// === 核心逻辑：根据字段出现情况判断推理阶段 ===
+								newContent := ""
+
+								// 情况 1：reasoning_content 存在且非空 => 进入/持续推理阶段
+								if hasRC && rcStr != "" {
+									if !isReasoning {
 										if debugMode {
 											fmt.Print("\n--- 推理开始 ---\n")
 										}
-										delta["content"] = "<thought>\n" + rc
-										hasReasoningStarted = true
+										newContent += "<thought>\n"
 										isReasoning = true
-									} else {
-										delta["content"] = rc
 									}
+									newContent += rcStr
 									if debugMode {
-										fmt.Print(rc)
+										fmt.Print(rcStr)
 									}
-								} else if isReasoning && (hasContent || choice["finish_reason"] != nil) {
-									// 推理结束切换到正文，或者直接结束
-									if debugMode {
-										fmt.Print("\n--- 正文开始 ---\n")
-									}
-									delta["content"] = "\n</thought>\n\n" + content
-									isReasoning = false
-									if debugMode && hasContent {
-										fmt.Print(content)
-									}
-								} else if debugMode && hasContent && content != "" {
-									fmt.Print(content)
 								}
 
-								// 清理原始字段并修复 content: null
+								// 情况 2：推理阶段中遇到 content => 立即闭合后输出正文
+								if isReasoning && hasNonNilContent {
+									if debugMode {
+										fmt.Print("\n--- 推理结束，正文开始 ---\n")
+									}
+									newContent += "\n</thought>\n\n"
+									isReasoning = false
+								}
+
+								// 情况 3：正文输出（含无推理或刚闭合后的正文）
+								if hasNonNilContent {
+									newContent += contentStr
+									if debugMode && contentStr != "" {
+										fmt.Print(contentStr)
+									}
+								}
+
+								// 情况 4：推理中直接结束（例如工具调用，无后续 content）
+								if isReasoning && choice["finish_reason"] != nil {
+									if debugMode {
+										fmt.Print("\n--- 推理结束（无后续内容）---\n")
+									}
+									newContent += "\n</thought>\n\n"
+									isReasoning = false
+								}
+
+								// 对于 finish_reason 收口，newContent 可能仅包含闭合标签，需确保写回。
+								if hasRC || hasNonNilContent || newContent != "" {
+									delta["content"] = newContent
+								}
+
+								// 清理原始 reasoning_content 字段（客户端不需要看到）
 								delete(delta, "reasoning_content")
+
+								// 修复 content: null 问题（某些客户端库不支持 null 字符串）
 								if v, exists := delta["content"]; exists && v == nil {
 									delta["content"] = ""
 								}
 							}
+
+							// finish_reason 收口已在当前 chunk 内完成，避免额外补发导致客户端漏收。
 						}
 					}
 
@@ -335,6 +399,17 @@ func processSSEResponse(w http.ResponseWriter, body io.Reader) {
 		w.Write(line)
 		if flusher != nil {
 			flusher.Flush()
+		}
+
+		if err != nil {
+			if isReasoning {
+				injectClosingTag(w, flusher)
+				isReasoning = false
+				if debugMode {
+					fmt.Print("\n--- 推理意外结束（无换行结尾）---\n")
+				}
+			}
+			break
 		}
 	}
 }
