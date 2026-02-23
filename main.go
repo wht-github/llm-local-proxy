@@ -160,8 +160,10 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("\n" + strings.Repeat("=", 80))
 		fmt.Println("📤 流式请求详情")
 		fmt.Println(strings.Repeat("-", 40))
-		fmt.Println("请求体 (简化):")
+		fmt.Println("客户端请求体 (简化):")
 		fmt.Println(getDebugRequestBody(originalBody))
+		fmt.Println("\n代理转发请求体 (简化):")
+		fmt.Println(getDebugRequestBody(body))
 		fmt.Println("\n📥 流式响应内容:")
 		fmt.Println(strings.Repeat("-", 40))
 	}
@@ -210,15 +212,12 @@ func ensureReasoningField(body []byte) []byte {
 		}
 
 		content, _ := msg["content"].(string)
-		hasThought := strings.Contains(content, "<thought>") && strings.Contains(content, "</thought>")
+		thought, cleanedContent, hasThought := normalizeThoughtContent(content)
 
 		if i < lastUserIdx {
 			// 情况 A: 历史轮次的思考内容，根据文档建议予以丢弃
 			if hasThought {
-				startIdx := strings.Index(content, "<thought>")
-				endIdx := strings.Index(content, "</thought>")
-				newContent := content[:startIdx] + content[endIdx+len("</thought>"):]
-				msg["content"] = strings.TrimSpace(newContent)
+				msg["content"] = strings.TrimSpace(cleanedContent)
 				changed = true
 			}
 			if _, exists := msg["reasoning_content"]; exists {
@@ -228,13 +227,20 @@ func ensureReasoningField(body []byte) []byte {
 		} else {
 			// 情况 B: 当前轮次（可能是工具调用），必须还原/保留 reasoning_content
 			if hasThought {
-				startIdx := strings.Index(content, "<thought>")
-				endIdx := strings.Index(content, "</thought>")
-				thought := content[startIdx+len("<thought>") : endIdx]
-				msg["reasoning_content"] = strings.TrimSpace(thought)
+				extractedThought := strings.TrimSpace(thought)
+				existingReasoning, _ := msg["reasoning_content"].(string)
+				existingReasoning = strings.TrimSpace(existingReasoning)
 
-				newContent := content[:startIdx] + content[endIdx+len("</thought>"):]
-				msg["content"] = strings.TrimSpace(newContent)
+				switch {
+				case existingReasoning == "":
+					msg["reasoning_content"] = extractedThought
+				case extractedThought == "":
+					// 保持已有 reasoning_content
+				default:
+					msg["reasoning_content"] = existingReasoning + "\n" + extractedThought
+				}
+
+				msg["content"] = strings.TrimSpace(cleanedContent)
 				changed = true
 			}
 
@@ -252,6 +258,37 @@ func ensureReasoningField(body []byte) []byte {
 		}
 	}
 	return body
+}
+
+// normalizeThoughtContent 严格修复 content 中的 thought 标签，并返回提取出的 thought 与清理后的正文。
+// 修复规则：
+// 1. <thought>...</thought> => 正常提取；
+// 2. 只有 <thought> 开标签 => 视为后续全部是 thought；
+// 3. 只有 </thought> 闭标签 => 视为脏数据，直接移除闭标签。
+func normalizeThoughtContent(content string) (thought string, cleanedContent string, hasThought bool) {
+	startIdx := strings.Index(content, "<thought>")
+	endIdx := strings.Index(content, "</thought>")
+
+	if startIdx >= 0 {
+		prefix := content[:startIdx]
+		if endIdx > startIdx {
+			thought = content[startIdx+len("<thought>") : endIdx]
+			cleanedContent = prefix + content[endIdx+len("</thought>"):]
+			return thought, cleanedContent, true
+		}
+
+		// 未闭合 thought：把开标签后全部当作推理内容，防止坏标签继续污染历史。
+		thought = content[startIdx+len("<thought>"):]
+		cleanedContent = prefix
+		return thought, cleanedContent, true
+	}
+
+	if endIdx >= 0 {
+		cleanedContent = strings.ReplaceAll(content, "</thought>", "")
+		return "", cleanedContent, true
+	}
+
+	return "", content, false
 }
 
 // processSSEResponse 处理 SSE 流式响应。
