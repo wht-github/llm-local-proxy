@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -24,36 +25,47 @@ type Config struct {
 }
 
 // Load reads and parses a JSON config file.
-func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
+func Load(path string) (Config, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("open config %s: %w", path, err)
+		return Config{}, fmt.Errorf("read config %s: %w", path, err)
 	}
-	defer f.Close()
 
 	var cfg Config
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 
-	if len(cfg.Providers) == 0 {
-		return nil, fmt.Errorf("no providers configured")
-	}
-	if cfg.Listen == "" {
-		cfg.Listen = ":12000"
+	if err := cfg.Validate(); err != nil {
+		return cfg, fmt.Errorf("config validation failed: %w", err)
 	}
 
-	for i, p := range cfg.Providers {
+	return cfg, nil
+}
+
+// Validate checks the configuration for required fields.
+func (c Config) Validate() error {
+	var errs []error
+
+	if len(c.Providers) == 0 {
+		errs = append(errs, errors.New("no providers configured"))
+	}
+	if c.Listen == "" {
+		errs = append(errs, errors.New("listen address is required (e.g. \":12000\")"))
+	}
+
+	for i, p := range c.Providers {
 		if p.Name == "" {
-			return nil, fmt.Errorf("provider[%d]: name is required", i)
+			errs = append(errs, fmt.Errorf("provider[%d]: name is required", i))
+			continue
 		}
 		if p.Type == "" {
-			return nil, fmt.Errorf("provider %q: type is required", p.Name)
+			errs = append(errs, fmt.Errorf("provider %q: type is required", p.Name))
 		}
 		if p.BaseURL == "" {
-			return nil, fmt.Errorf("provider %q: base_url is required", p.Name)
+			errs = append(errs, fmt.Errorf("provider %q: base_url is required", p.Name))
 		}
 	}
 
-	return &cfg, nil
+	return errors.Join(errs...)
 }

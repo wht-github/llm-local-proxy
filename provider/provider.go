@@ -31,7 +31,7 @@ type Registry struct {
 }
 
 // NewRegistry builds a provider registry from configuration.
-func NewRegistry(cfg *config.Config) (*Registry, error) {
+func NewRegistry(cfg config.Config) (*Registry, error) {
 	r := &Registry{
 		byModel: make(map[string]Provider),
 		debug:   cfg.Debug,
