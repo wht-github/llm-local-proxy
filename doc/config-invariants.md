@@ -18,4 +18,4 @@ This means code after `Load` should treat `cfg` as an already validated value an
 
 Validation belongs at the config boundary.
 
-Downstream code such as provider registry construction may rely on these invariants and focus on its own domain checks, for example whether `DefaultProvider` points to a configured provider type.
+Downstream code such as provider registry construction may rely on these invariants and focus on its own domain checks.

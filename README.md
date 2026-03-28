@@ -47,8 +47,7 @@ cp config.example.json config.json
       "api_key": "your-key",
       "models": ["glm-5", "glm-5-turbo", "glm-4.7"]
     }
-  ],
-  "default_provider": "deepseek"
+  ]
 }
 ```
 
@@ -79,8 +78,8 @@ http://127.0.0.1:12000/v1
 
 - 请求体中的 `model` 字段会匹配 Provider 配置中的 `models` 列表
 - `models` 中可使用 `"*"` 作为通配符，匹配所有未被其他 Provider 捕获的模型
-- 未匹配到任何 Provider 时，使用 `default_provider`
-- 非 chat 请求（如 `/v1/models`）也走 `default_provider`
+- 无法匹配任何 Provider 时，返回 502 错误
+- 非 chat 请求（如 `/v1/models`）若无法解析 model 字段也会返回 502
 
 ## 路径处理
 

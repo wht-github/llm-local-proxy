@@ -20,10 +20,10 @@ var httpClient = &http.Client{
 
 // Handler routes incoming requests to upstream providers.
 type Handler struct {
-	registry *provider.Registry
+	registry provider.Registry
 }
 
-func NewHandler(registry *provider.Registry) *Handler {
+func NewHandler(registry provider.Registry) *Handler {
 	return &Handler{registry: registry}
 }
 
@@ -39,6 +39,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve provider by model in request body
 	p := h.resolveProvider(body)
+	if p == nil {
+		http.Error(w, "no provider matched for requested model", http.StatusBadGateway)
+		return
+	}
 	fmt.Printf("  → provider: %s (%s)\n", p.Name(), p.BaseURL())
 
 	// Transform request body (provider-specific)
@@ -99,10 +103,10 @@ func (h *Handler) resolveProvider(body []byte) provider.Provider {
 	var req struct {
 		Model string `json:"model"`
 	}
-	if json.Unmarshal(body, &req) == nil && req.Model != "" {
+	if json.Unmarshal(body, &req) == nil {
 		return h.registry.Resolve(req.Model)
 	}
-	return h.registry.Default()
+	return nil
 }
 
 // stripVersionPrefix removes "/v1", "/v2", etc. from the path prefix.
