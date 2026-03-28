@@ -25,6 +25,6 @@ func (p *Passthrough) Name() string    { return p.name }
 func (p *Passthrough) BaseURL() string { return p.baseURL }
 func (p *Passthrough) APIKey() string  { return p.apiKey }
 
-func (p *Passthrough) TransformRequest(body []byte) []byte  { return body }
+func (p *Passthrough) TransformRequest(body []byte) []byte                             { return body }
 func (p *Passthrough) TransformStreamDelta(_ map[string]any, _ *transform.StreamState) {}
-func (p *Passthrough) TransformResponse(body []byte) []byte { return body }
+func (p *Passthrough) TransformResponse(body []byte) []byte                            { return body }

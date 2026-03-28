@@ -17,7 +17,7 @@ type ProviderConfig struct {
 
 // Config is the top-level configuration.
 type Config struct {
-	Listen          string           `json:"listen"`           // e.g. ":12000"
+	Listen          string           `json:"listen"` // e.g. ":12000"
 	Debug           bool             `json:"debug"`
 	Providers       []ProviderConfig `json:"providers"`
 	DefaultProvider string           `json:"default_provider"` // Name of the default provider
