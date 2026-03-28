@@ -1,5 +1,28 @@
 {
-  "api_key": "your-deepseek-api-key-here",
-  "proxy_port": "12000",
-  "target_base_url": "https://api.deepseek.com"
+  "listen": ":12000",
+  "debug": false,
+  "providers": [
+    {
+      "name": "deepseek",
+      "type": "deepseek",
+      "base_url": "https://api.deepseek.com",
+      "api_key": "sk-your-deepseek-key",
+      "models": ["deepseek-chat", "deepseek-reasoner"]
+    },
+    {
+      "name": "kimi",
+      "type": "kimi",
+      "base_url": "https://api.moonshot.cn/v1",
+      "api_key": "sk-your-moonshot-key",
+      "models": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo"]
+    },
+    {
+      "name": "zhipu",
+      "type": "zhipu",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key": "your-zhipu-key",
+      "models": ["glm-5", "glm-5-turbo", "glm-4.7"]
+    }
+  ],
+  "default_provider": "deepseek"
 }
