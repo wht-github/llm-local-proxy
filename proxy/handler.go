@@ -48,8 +48,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Transform request body (provider-specific)
 	body = p.TransformRequest(body)
 
-	// Build upstream URL: base_url + stripped path
-	targetURL := p.BaseURL() + stripVersionPrefix(r.URL.Path)
+	// Build upstream URL
+	targetURL := p.BaseURL() + "/chat/completions"
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "Failed to create request", http.StatusInternalServerError)

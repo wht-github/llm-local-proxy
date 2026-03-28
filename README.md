@@ -29,7 +29,7 @@ cp config.example.json config.json
     {
       "name": "deepseek",
       "type": "deepseek",
-      "base_url": "https://api.deepseek.com",
+      "base_url": "https://api.deepseek.com/v1",
       "api_key": "sk-your-key",
       "models": ["deepseek-chat", "deepseek-reasoner"]
     },
@@ -83,12 +83,11 @@ http://127.0.0.1:12000/v1
 
 ## 路径处理
 
-代理自动剥离请求路径中的版本前缀（`/v1`、`/v2` 等），然后拼接到 Provider 的 `base_url`：
+所有请求固定转发到 `base_url + /chat/completions`。`base_url` 须包含版本路径段：
 
-- 客户端请求 `/v1/chat/completions`
-- DeepSeek (`base_url: "https://api.deepseek.com"`) → `https://api.deepseek.com/chat/completions`
-- Kimi (`base_url: "https://api.moonshot.cn/v1"`) → `https://api.moonshot.cn/v1/chat/completions`
-- 智谱 (`base_url: "https://open.bigmodel.cn/api/paas/v4"`) → `https://open.bigmodel.cn/api/paas/v4/chat/completions`
+- DeepSeek: `https://api.deepseek.com/v1`
+- Kimi: `https://api.moonshot.cn/v1`
+- 智谱: `https://open.bigmodel.cn/api/paas/v4`
 
 ## 构建
 
