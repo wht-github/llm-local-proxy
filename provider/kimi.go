@@ -30,7 +30,7 @@ func (k *Kimi) APIKey() string  { return k.apiKey }
 
 func (k *Kimi) TransformRequest(body []byte) []byte {
 	// Kimi: restore reasoning from <thought> tags, preserve all history reasoning
-	return transform.PrepareRequestMessages(body, false, false)
+	return transform.PrepareRequestMessages(body, true, false)
 }
 
 func (k *Kimi) TransformStreamDelta(choice map[string]any, state *transform.StreamState) {

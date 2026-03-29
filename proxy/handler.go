@@ -61,6 +61,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if apiKey := p.APIKey(); apiKey != "" {
 		proxyReq.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	proxyReq.Header.Set("User-Agent", "claude-code/1.0")
 	proxyReq.Header.Del("Accept-Encoding") // Disable compression for real-time content modification
 	proxyReq.Header.Del("Content-Length")  // Let http.Client recalculate
 	proxyReq.ContentLength = int64(len(body))

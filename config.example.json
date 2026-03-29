@@ -5,23 +5,23 @@
     {
       "name": "deepseek",
       "type": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-your-deepseek-key",
+      "base_url": "https://api.deepseek.com",
+      "api_key": "",
       "models": ["deepseek-chat", "deepseek-reasoner"]
     },
     {
       "name": "kimi",
       "type": "kimi",
-      "base_url": "https://api.moonshot.cn/v1",
-      "api_key": "sk-your-moonshot-key",
-      "models": ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo"]
+      "base_url": "https://api.kimi.com/coding/v1",
+      "api_key": "",
+      "models": ["kimi-for-coding"]
     },
     {
       "name": "zhipu",
       "type": "zhipu",
-      "base_url": "https://open.bigmodel.cn/api/paas/v4",
-      "api_key": "your-zhipu-key",
-      "models": ["glm-5", "glm-5-turbo", "glm-4.7"]
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "api_key": "",
+      "models": ["glm-5", "glm-5.1", "glm-4.7"]
     }
   ]
 }
