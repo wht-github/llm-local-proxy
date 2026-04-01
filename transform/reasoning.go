@@ -223,8 +223,16 @@ func PrepareRequestMessages(body []byte, requireField bool, cleanHistory bool) [
 				changed = true
 			}
 			if _, exists := msg["reasoning_content"]; exists {
-				delete(msg, "reasoning_content")
-				changed = true
+				if requireField {
+					// Keep field but clear value (API requires it to exist)
+					if msg["reasoning_content"] != "." {
+						msg["reasoning_content"] = "."
+						changed = true
+					}
+				} else {
+					delete(msg, "reasoning_content")
+					changed = true
+				}
 			}
 		} else {
 			// Current turn: restore reasoning_content from <thought> tags
@@ -245,13 +253,14 @@ func PrepareRequestMessages(body []byte, requireField bool, cleanHistory bool) [
 				msg["content"] = strings.TrimSpace(cleanedContent)
 				changed = true
 			}
+		}
 
-			// DeepSeek requires reasoning_content field to exist on assistant messages
-			if requireField {
-				if _, exists := msg["reasoning_content"]; !exists {
-					msg["reasoning_content"] = ""
-					changed = true
-				}
+		// Ensure reasoning_content exists on ALL assistant messages when required
+		// (DeepSeek, Kimi with thinking enabled reject messages without this field)
+		if requireField {
+			if val, exists := msg["reasoning_content"]; !exists || val == nil {
+				msg["reasoning_content"] = "."
+				changed = true
 			}
 		}
 	}

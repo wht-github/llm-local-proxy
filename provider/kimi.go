@@ -7,7 +7,7 @@ import (
 
 // Kimi (Moonshot) uses reasoning_content identically to DeepSeek.
 // Docs recommend preserving all reasoning_content in context (no history cleanup).
-// Field is not strictly required (no 400 if missing).
+// When thinking is enabled, reasoning_content is required on all assistant messages.
 type Kimi struct {
 	name    string
 	baseURL string
