@@ -7,7 +7,8 @@
       "type": "deepseek",
       "base_url": "https://api.deepseek.com",
       "api_key": "",
-      "models": ["deepseek-chat", "deepseek-reasoner"]
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+      "reasoning_effort": "max"
     },
     {
       "name": "kimi",

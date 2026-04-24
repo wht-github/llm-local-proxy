@@ -45,6 +45,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Printf("  → provider: %s (%s)\n", p.Name(), p.BaseURL())
 
+	// Log key request parameters
+	h.logRequestParams(body)
+
 	// Transform request body (provider-specific)
 	body = p.TransformRequest(body)
 
@@ -108,6 +111,47 @@ func (h *Handler) resolveProvider(body []byte) provider.Provider {
 		return h.registry.Resolve(req.Model)
 	}
 	return nil
+}
+
+// logRequestParams prints key parameters from the incoming request body.
+func (h *Handler) logRequestParams(body []byte) {
+	var req map[string]any
+	if json.Unmarshal(body, &req) != nil {
+		return
+	}
+
+	// Core fields
+	logField := func(key string) {
+		if val, ok := req[key]; ok && val != nil {
+			fmt.Printf("    %-20s %v\n", key+":", val)
+		}
+	}
+
+	logField("model")
+	logField("stream")
+	logField("reasoning_effort")
+	logField("max_tokens")
+	logField("max_completion_tokens")
+	logField("temperature")
+	logField("top_p")
+	logField("presence_penalty")
+	logField("frequency_penalty")
+	logField("n")
+
+	// thinking (nested object)
+	if thinking, ok := req["thinking"].(map[string]any); ok {
+		fmt.Printf("    %-20s %v\n", "thinking:", thinking)
+	}
+
+	// Message count
+	if msgs, ok := req["messages"].([]any); ok {
+		fmt.Printf("    %-20s %d\n", "messages:", len(msgs))
+	}
+
+	// Tool count
+	if tools, ok := req["tools"].([]any); ok {
+		fmt.Printf("    %-20s %d\n", "tools:", len(tools))
+	}
 }
 
 // stripVersionPrefix removes "/v1", "/v2", etc. from the path prefix.

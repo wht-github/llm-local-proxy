@@ -9,11 +9,12 @@ import (
 
 // ProviderConfig defines a single upstream LLM provider.
 type ProviderConfig struct {
-	Name    string   `json:"name"`
-	Type    string   `json:"type"`     // "deepseek", "kimi", "zhipu", "passthrough"
-	BaseURL string   `json:"base_url"` // Full base URL including version path (e.g. "https://api.moonshot.cn/v1")
-	APIKey  string   `json:"api_key"`
-	Models  []string `json:"models"` // Model names to route to this provider; "*" = catch-all
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`     // "deepseek", "kimi", "zhipu", "passthrough"
+	BaseURL         string   `json:"base_url"` // Full base URL including version path (e.g. "https://api.moonshot.cn/v1")
+	APIKey          string   `json:"api_key"`
+	Models          []string `json:"models"`                     // Model names to route to this provider; "*" = catch-all
+	ReasoningEffort string   `json:"reasoning_effort,omitempty"` // injected into request if client doesn't send it ("high" / "max")
 }
 
 // Config is the top-level configuration.

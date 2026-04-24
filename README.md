@@ -6,10 +6,30 @@
 
 | Provider | Type | 思维链字段 | 特殊处理 |
 |----------|------|-----------|---------|
-| DeepSeek | `deepseek` | `reasoning_content` | 强制要求字段存在，历史轮次清理 |
+| DeepSeek | `deepseek` | `reasoning_content` | 强制要求字段存在，历史轮次清理，`reasoning_effort` 值映射 |
 | Kimi (Moonshot) | `kimi` | `reasoning_content` | 保留全部历史推理上下文 |
 | 智谱 GLM | `zhipu` | `reasoning_content` | 历史轮次清理 |
 | 透传 | `passthrough` | - | 不做任何变换 |
+
+## Reasoning Effort（配置注入）
+
+VS Code Copilot 等客户端不会在请求中发送 `reasoning_effort` 参数。对于需要该参数的 Provider（如 DeepSeek），可在配置文件中设置，代理会自动注入：
+
+```json
+{
+  "name": "deepseek",
+  "type": "deepseek",
+  "reasoning_effort": "max"
+}
+```
+
+- 仅当客户端请求中**未包含** `reasoning_effort` 时才会注入
+- DeepSeek 仅支持 `high` 和 `max`
+- 对 `kimi` / `zhipu` / `passthrough` 无实际作用
+
+## 请求参数日志
+
+收到请求时，代理自动打印关键参数（`model`、`stream`、`reasoning_effort`、`temperature`、`max_tokens`、`thinking`、消息数、工具数等），便于调试。
 
 ## 快速开始
 
@@ -29,9 +49,10 @@ cp config.example.json config.json
     {
       "name": "deepseek",
       "type": "deepseek",
-      "base_url": "https://api.deepseek.com/v1",
+      "base_url": "https://api.deepseek.com",
       "api_key": "sk-your-key",
-      "models": ["deepseek-chat", "deepseek-reasoner"]
+      "models": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+      "reasoning_effort": "max"
     },
     {
       "name": "kimi",

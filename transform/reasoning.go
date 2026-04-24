@@ -113,6 +113,30 @@ func TransformDelta(choice map[string]any, state *StreamState, debug bool) {
 	}
 }
 
+// InjectReasoningEffort sets reasoning_effort in the request body from config.
+// Only injects if the request doesn't already have the field and config has a value.
+// Logs the injection when debug is enabled.
+func InjectReasoningEffort(body []byte, effort string, debug bool) []byte {
+	if effort == "" {
+		return body
+	}
+	var data map[string]any
+	if err := json.Unmarshal(body, &data); err != nil {
+		return body
+	}
+	if _, exists := data["reasoning_effort"]; exists {
+		return body
+	}
+	data["reasoning_effort"] = effort
+	if debug {
+		fmt.Printf("  ↔ reasoning_effort (from config): %q\n", effort)
+	}
+	if newBody, err := json.Marshal(data); err == nil {
+		return newBody
+	}
+	return body
+}
+
 // ClosingTagSSE returns the SSE data line to inject when a stream ends mid-reasoning.
 func ClosingTagSSE() string {
 	msg := map[string]any{
